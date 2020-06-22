@@ -1,0 +1,442 @@
+---
+title: 'HarvardX Capstone: London Crime Project'
+author: "Somosree Banerjee"
+date: "21/06/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## I. Introduction
+
+This report is part of the final capstone project of the EdX course "HarvardX: PH125.9x Data Science: Capstone". The goal is to challenge and demonstrate how the knowledge acquired through the different topics covered in "HarvardX: PH125.9x Data Science" can be applied in solving real world problems.
+For this project, the London Crime data spanning 2008-2016 has been considered from the source:https://www.kaggle.com/jboysen/london-crime. The entire report will step by step explain the approach of data analysis and machine algorithm on the London Crime data set.
+
+## II. Summary
+
+For the London Crime project, the data set provided has been taken from Kaggle.The aim is to create a recommendation system using the “prediction version of problem”. 
+The report has been split in three sections:
+1. Data Loading
+2. Data Visualization & Exploration 
+3. Machine Learning Algorithm for predicting  a model
+
+## III. Data Loading
+
+Memory has been set and the garbage collection has been excuted with respect to the current active session,
+```{r Memory}
+#Memory 
+memory.limit()
+memory.limit(size=560000)
+gc()
+rm()
+```
+
+This section consist of the data loading details and the creation of training and test data corresponding to the London Crime data set.
+It should be noted that the entire analysis,visualization and prediction model determination using machine learning has been done on the training set. The validation of the prediction model has been carried on with the corresponding to the validation set.
+
+```{r Library Loading}
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(splitstackshape)) install.packages("splitstackshape")
+if(!require(DT)) install.packages("DT")
+if(!require(lubridate)) install.packages("lubridate")
+if(!require(ggpubr)) install.packages("ggpubr")
+if(!require(patchwork)) install.packages("patchwork")
+if(!require(hrbrthemes)) install.packages("hrbrthemes")
+if(!require(scales)) install.packages("scales")
+if(!require(tidytext)) install.packages("tidytext")
+if(!require(ggalt))install.packages("ggalt")
+if(!require(purrr))install.packages("purrr")
+if(!require(randomForest))install.packages("randomForest")
+# Libraries
+library(tidyverse)
+library(caret)
+library(data.table)
+library(splitstackshape)
+library(DT)
+library(lubridate)
+library(ggpubr)    ## Extra visualizations and themes
+library(patchwork) ## Patch visualizations together
+library(hrbrthemes)## extra themes and formatting
+library(scales)    ## For formatting numeric variables
+library(tidytext)  ## Reordering within facets in ggplot2
+library(ggalt)     ## Extra visualizations
+library(purrr)
+library(randomForest) 
+```
+The data has been loaded from Kaggle : https://www.kaggle.com/jboysen/london-crime and an additional field "Display_Date" (considering 1st Day of the Month) has been introduced in order to have a better visualization with the methods avilable in the available loaded libraries.
+```{r Data Loading}
+london_crimes <- read_csv("C:\\Somosree_BackUp\\Somosree\\DataScience\\Harvard\\Capstone\\LondonCrimeProject\\LondonCrimeProject\\london_crime_by_lsoa.csv",trim_ws = TRUE) 
+london_crimes <- london_crimes %>% mutate(Display_Date = as.Date(paste(london_crimes$year, london_crimes$month, 1, sep = "-")))
+
+## Show the first 6 rows
+head(london_crimes)
+
+# Validation set will be 10% of data
+set.seed(1, sample.kind="Rounding")
+
+test_index <- createDataPartition(y = london_crimes$value, times = 1, p = 0.1, list = FALSE)
+edx_london_crimes <- london_crimes[-test_index,]
+temp_london_crimes <- london_crimes[test_index,]
+
+# Make sure lsoa_code is avaible in main edx_london_crimes
+validation <- temp_london_crimes %>% 
+  semi_join(edx_london_crimes, by = "lsoa_code") 
+
+# Add rows removed from validation set back into edx_london_crimes set
+removed <- anti_join(temp_london_crimes, validation)
+edx_london_crimes <- rbind(edx_london_crimes, removed)
+
+head(edx_london_crimes)
+```
+
+## III. Data Visualization & Exploration
+
+In this section, various visualization methods have been implemented in order to analyze and explore the data so that a pattern of London Crime Count can be determined based on the available data set.
+Most of the data analysis representation has been potrayed using a tabular as well as graphical view.
+
+A quantitative analysis has been conducted to undertand the yearly crime count across 2008-2016 and the corresponding percentage variation per year.
+```{r Quantitative Analysis - Yearly Crime Count}
+#Tabular Representation
+edx_Yearly_Crime_Count <- edx_london_crimes %>% 
+  group_by(Year = year) %>%
+  summarise(CrimeCount=sum(value,na.rm = TRUE)) %>%   
+  ungroup() %>% mutate(Percent_Crime_Variation = (CrimeCount-lag(CrimeCount))/lag(CrimeCount),
+                       Percent_Crime_Variation=replace_na(Percent_Crime_Variation,0)) %>% 
+  arrange(desc(CrimeCount))
+
+datatable(edx_Yearly_Crime_Count, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T) ) %>%
+  formatRound('CrimeCount',digits=0, interval = 3, mark = ",") %>%
+  formatRound('Percent_Crime_Variation',digits=3, interval = 3, mark = ",")
+#Graphical Representation (Bar Graph)
+edx_Yearly_Crime_Count <- edx_london_crimes %>% 
+  group_by(Year = floor_date(Display_Date,unit = "year")) %>%
+  summarise(CrimeCount=sum(value,na.rm = TRUE)) %>%   
+  ungroup() %>% mutate(Percent_Crime_Variation = (CrimeCount-lag(CrimeCount))/lag(CrimeCount),
+                       Percent_Crime_Variation=replace_na(Percent_Crime_Variation,0)) 
+
+edx_Yearly_Crime_Count%>%   
+  ggplot(aes(Year,CrimeCount))+               
+  geom_bar(stat="identity",fill="skyblue",color="black")+        
+  geom_line(color="brown",size=1.5,linetype="dashed")+     
+  geom_text(aes(label=percent(Percent_Crime_Variation)),vjust=-1,color="black",fontface="bold")+  geom_text(aes(label=comma(CrimeCount)),vjust=1,fontface="bold",color="white")+ 
+  scale_y_comma(expand = c(0,0),limits = c(0,800000))+         
+  scale_x_date(breaks = "year",date_labels ="%Y")+         
+  theme_classic()+                                             
+  labs(title = "Total Crime Count in London over the years")
+```
+As per the analysis, 2014 has the least crime count and 2016 has the highest crime count.
+
+It is require to understand how the crime count has been distributed across the different Boroughs and which has the highest crime count in the span 0f 2008-2016
+```{r Quantitative Analysis - Crime Count per Borough}
+edx_london_crimes_borough <- edx_london_crimes %>%                                     
+  group_by(borough) %>% 
+  summarise(CrimeCount=sum(value))%>%
+  arrange(desc(CrimeCount))%>% 
+  ungroup()
+#Tabular Representation
+datatable(edx_london_crimes_borough, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T) ) %>%
+  formatRound('CrimeCount',digits=0, interval = 3, mark = ",") 
+#Graphical Representation (Bar Graph)
+edx_london_crimes_borough %>% 
+  ggplot(aes(reorder(borough,CrimeCount),CrimeCount))+
+  geom_bar(stat = "identity",aes(fill=borough),color="black")+
+  coord_flip()+
+  scale_y_comma()+
+  geom_text(aes(label=comma(CrimeCount)),hjust=1)+
+  theme_classic()+
+  theme(legend.position = "none")+
+  labs(x=" ",y=" ",title = "Total Crimes for boroughs from 2008-2016 ")
+```
+As per the above visual representation, Westminster has the highest crime count in the span of 2008-2016.
+
+Now, it is require to determine how the crime rate has increased and which borough has the highest increase in the years spanning of 2008 -2016.
+```{r Quantitative Analysis - Crime Percentage Increase Segmented by Borough}
+edx_london_crimes_evolution <-edx_london_crimes %>% 
+  group_by(borough) %>% summarise(Crimes_2008=sum(value[year(Display_Date)==2008]),Crimes_2016=sum(value[year(Display_Date)==2016])) %>% 
+  ungroup() %>% 
+  mutate(CrimeRateIncPct=(Crimes_2016-Crimes_2008)/Crimes_2016) %>%
+  arrange(desc(CrimeRateIncPct)) 
+
+#Tabular Representation
+datatable(edx_london_crimes_evolution, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T) ) %>%
+  formatRound('CrimeRateIncPct',digits=3, interval = 3, mark = ",")
+
+#Graphical Representation (Bar Graph)
+edx_london_crimes_evolution%>%      
+  ggplot(aes(reorder(borough,CrimeRateIncPct),CrimeRateIncPct))+                       
+  geom_bar(stat = "identity",aes(fill=borough),color="black")+               
+  coord_flip()+
+  scale_y_continuous(labels = percent_format())+                             
+  geom_text(aes(label=percent(CrimeRateIncPct)),hjust=1)+
+  theme_classic()+
+  theme(legend.position = "none")+                                           
+  labs(x=" ",y="Percentage Change ",title = "Percentage Change in Crimes from 2008-2016")
+
+```
+ The graphical and tabular representation shows that London has highest crime increase (%) whereas WestMinster doesn't show any steep increase in crime count over the year 2008 -2016.
+
+Next, the available data set has been visualized for Boroughs having the highest crime count and the corresponding year.
+```{r Quantitative Analysis - Highest Crime Count for a Borough and the corresponding year}
+edx_Max_Crimes_Borough_Year <- edx_london_crimes %>% 
+  group_by(borough,Year = year) %>% 
+  summarise(CrimeCount=sum(value)) %>%
+  ungroup() %>% 
+  group_by(borough) %>%
+  filter(CrimeCount==max(CrimeCount)) %>%  
+  ungroup() %>% 
+  arrange(desc(CrimeCount))
+
+#Tabular Representation
+datatable(edx_Max_Crimes_Borough_Year, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T) ) 
+
+#Graphical Representation (Point Graph)
+edx_Max_Crimes_Borough_Year %>%mutate(boroughMaxYearCrime = paste0(borough,"-","(",Year,")"))%>%                                                                    
+  ggplot(aes(reorder(boroughMaxYearCrime,CrimeCount),CrimeCount))+
+  geom_point()+
+  scale_y_comma()+
+  coord_flip()+
+  geom_text(aes(label=comma(CrimeCount)),hjust=1)+
+  theme_classic()+
+  theme(legend.position = "none")+
+  labs(title = "Max Crimes for each Borough",x="Borough and year of max Crimes ",y="Crime Count")
+```
+The visualization shows different Boroughs having the maximum crime count and the corresponding year when it has happened.
+Having understanding the trend, the year with Boroughs having maximum highest crime count can be determined as below:
+
+```{r Quantitative Analysis - Year having maximum Boroughs with highest crime count}
+edx_Boroughs_with_max_incidents <- edx_london_crimes %>% 
+  group_by(borough,Year = year) %>% 
+  summarise(CrimeCount=sum(value)) %>%
+  ungroup() %>% 
+  group_by(borough) %>%
+  filter(CrimeCount==max(CrimeCount)) %>%  
+  ungroup() %>% 
+  count(Year,sort = TRUE,name = "Boroughs_with_max_incidents")%>%
+  arrange(desc(Boroughs_with_max_incidents))
+datatable(edx_Boroughs_with_max_incidents, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T) ) 
+```
+
+ The above tabular representation above depicts 2016 has maximum number of Boroughs with highest crime count spannin 2008-2016.
+ 
+After undertanding the data pattern with respect to Crime count and its segreggation across Boroughs spanning the years 2008 -2016, it is required to do a deep down analysis with respect to the other two data features - Major and Minor Category. 
+The expectation is to understand how the categories have attributed to Crime Count in the London Crime Data Set.
+
+```{r Quantitative Analysis - Crime Count segmented by Major Ctaegory}
+#Tabular Representation
+edx_Maj_Cat_Crimes <- edx_london_crimes %>% 
+  group_by(major_category) %>%
+  summarize(CrimeCount = n()) %>%
+  arrange(desc(CrimeCount)) %>%
+  ungroup() 
+
+datatable(edx_Maj_Cat_Crimes, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T)) 
+
+```
+
+The tabular representation shows the  Major Category sorted in descending order with respect to the corresponding Crime Count. "Theft and Handling" and "Violence Against the Person" proves to be major contributor in the over all crime count from 2008-2016.
+
+The next visual representation is to understand how Crime Count has behaved over the years spanning 2008 -2016 for each of the Major Category.
+
+```{r Quantitative Analysis - Major Category Attribution to Crime Count}
+#Graphical Representation (Yearly Timeline) (Line Graph)
+edx_london_crimes %>% 
+  group_by(Yearly=year,major_category) %>% 
+  summarise(CrimeCount=sum(value,na.rm = TRUE)) %>% 
+  ggplot(aes(Yearly,CrimeCount))+
+  geom_line(aes(color=major_category),size=0.75)+
+  theme_pubclean()+
+  scale_y_comma()+
+  expand_limits(y=0)+ 
+  facet_wrap(~major_category,scales = "free")+
+  labs(y="Crime Count",x=" ")+
+  theme(legend.position = "none",strip.background = element_rect(fill="steelblue"),strip.text=element_text(color = "white",face="bold"))
+```
+ The Yearly Time line graph clearly depicts that for "Theft and Handling" and "Violence Agianst the person", there is steady increase in count from 2014 -2016. "Fraud or Forgery" and "Sexual Offences" have flattend after 2008, one of the probable reason being the both of them are now reported against the category "Violence Against the Person".
+The relationship and impact between Major and Minor Category needs to be visualized and explored as well.
+```{r Quantitative Analysis - Impact of Minor Category in Major Category}
+edx_london_crimes_Maj_Min_Category <-edx_london_crimes %>% 
+  group_by(major_category,minor_category) %>% 
+  summarise(CrimeCount=sum(value)) %>%
+  arrange(desc(CrimeCount)) %>%
+  ungroup() 
+
+#Tabular Representation
+datatable(edx_london_crimes_Maj_Min_Category, rownames = FALSE, filter="top", options = list(pageLength = 50, scrollX=T) ) 
+
+#Graphical Representation (Bar Graph)
+edx_london_crimes_Maj_Min_Category%>% 
+  mutate(minor_category=reorder_within(minor_category,CrimeCount,major_category)) %>%
+  ggplot(aes(minor_category,CrimeCount))+
+  geom_bar(aes(fill=minor_category),stat = "identity",color="black")+
+  coord_flip()+
+  scale_x_reordered()+
+  scale_y_comma()+
+  geom_text(aes(label=comma(CrimeCount)),hjust=1)+
+  theme_classic()+
+  theme(legend.position = "none")+
+  facet_wrap(~major_category,scales ="free")+
+  labs(x=" ",y=" ",title = "Count by Minor Category",subtitle = "Seggreggated by Major Category")+
+  theme(legend.position = "none",strip.background = element_rect(fill="orange"),strip.text=element_text(color = "white",face="bold"))
+```
+As per the above representation, the  Minor Categories with the highest Crime Count belong to "Theft and Handling" and "Violence Against the Person" Major Category.
+
+Conclusions:
+1. 2014 has least Crime Count; the count is increasing henceforth from 2014-2016.
+2. Westminster has the highest Crime Count and London has the lowest Crime count.
+3. London has the highest percentage increase in Crime from 2008 to 2016.
+4. Crime Count in Westminster is steady and there is no steep increase in count in the span 2008-2016.
+5. 2016 has the maximum number of Boroughs with highest Crime count.
+6. Theft and Handling" and "Violence Against the Person" proves to be major contributor in the over all crime count from 2008-2016.
+7. Theft and Handling" and "Violence Agianst the person", there is steady increase in count from 2014 -2016. 
+8."Fraud or Forgery" and "Sexual Offences" have flattend after 2008
+
+
+## IV. Machine Learning Algorithm for Prediction
+
+The idea is to understand and find relationship in order to predict a model to access the Crime Count corresponding to the Major Category - Theft and Handling" and "Violence Against the Person" based on the available data in Lodon Crime Dataset in 2008-2016.
+The following algorithms were selected for generating the prediction model and fitting it against the Validation data set (generated in the Data Loading Section).
+1.Linear Regression 
+2.PENALIZED LEAST SQUARE for Root Mean Square Error (RMSE) calculation
+3.K-nearest neighbour (KNN)
+4. Random Forest
+
+#Linear Regression 
+```{r Linear Regression}
+
+edx_Maj_Cat <- as.numeric(edx_london_crimes$major_category %in% c("Theft and Handling","Violence Against the Person"))
+
+lm_fit_major_category <- mutate(edx_london_crimes, y = edx_Maj_Cat) %>% lm(y~ value, data = .)
+p_hat_major_catagory <- predict(lm_fit_major_category, validation)
+
+summary(lm_fit_major_category)
+#Coefficients
+coefs <- tidy(lm_fit_major_category, conf.int = TRUE)
+
+#Graphical Representation
+edx_london_crimes %>% 
+  mutate(x = value) %>%
+  group_by(x) %>%
+  summarize(y = mean(edx_Maj_Cat)) %>%
+  ggplot(aes(x, y)) +
+  geom_point() + 
+  geom_abline(intercept = lm_fit_major_category$coef[1], slope = lm_fit_major_category$coef[2])
+
+```
+
+The model seems to be linear based on the calculation and the corresponding graphical relationship above.
+#Root Mean Square Error (RMSE)
+
+```{r RMSE}
+MSE <- function(true_count, predicted_count){
+  sqrt(mean((true_count - predicted_count)^2))
+}
+
+#Choose Lambda Values for tuning
+lambdas <- seq(0,5,.5)
+rmses <- sapply(lambdas, function(l){
+  mu <- mean(edx_london_crimes$value)
+  
+  b_i <- edx_london_crimes %>%
+    group_by(lsoa_code) %>%
+    summarize(b_i = sum(value - mu)/(n() + l))
+  
+  b_u <- edx_london_crimes %>%
+    left_join(b_i, by='lsoa_code') %>% 
+    group_by(major_category) %>%
+    summarize(b_u = sum(value - b_i - mu)/(n() +l))
+  
+  predicted_count <- edx_london_crimes %>%
+    left_join(b_i, by = "lsoa_code") %>%
+    left_join(b_u, by = "major_category") %>%
+    mutate(pred = mu + b_i +  b_u) %>% .$pred
+  
+  return(RMSE(predicted_count, edx_london_crimes$value))
+})
+
+qplot(lambdas, rmses)
+lambda <- lambdas[which.min(rmses)]
+paste('Optimal RMSE of',min(rmses),'is achieved with Lambda',lambda)
+# Predicting the validation set
+
+mu <- mean(validation$value)
+l <- lambda
+b_i <- validation %>%
+  group_by(lsoa_code) %>%
+  summarize(b_i = sum(value - mu)/(n() + l))
+
+b_u <- validation %>%
+  left_join(b_i, by='lsoa_code') %>% 
+  group_by(major_category) %>%
+  summarize(b_u = sum(value - b_i - mu)/(n() +l))
+
+predicted_count <- validation %>%
+  left_join(b_i, by = "lsoa_code") %>%
+  left_join(b_u, by = "major_category") %>%
+  mutate(pred = mu + b_i +  b_u) %>% .$pred
+
+
+RMSE(predicted_count, validation$value)
+```
+The RMSE calculated and validated against the Validation set - 1.6569
+
+#K Nearest Neighbour (KNN)
+The London DataSet is big (889M);As a result, there has been instances with R  where "Memory Leak" has been thrown. Moreover, there was error related to KNN calculation because of the big data set.
+Hence, the Training and Validation data set are re-generated on a more filter data set. Also a small optimal amount of "noise" has been added in order to deal with the large data set and trick through the errors. 
+
+
+```{r - KNN}
+#Create Train and Test Data Set
+
+
+edx_Knn_london_crimes <- london_crimes %>% 
+  filter(major_category %in% c("Theft and Handling","Violence Against the Person")) %>% group_by(year,major_category)%>% 
+  summarise(crimeCount = sum(value)) %>% ungroup() 
+
+#Adding noise to handle large data set
+x <- edx_Knn_london_crimes$crimeCount
+corrupt <- rbinom(length(x),1,0.4)    # choose an average of 40% to corrupt at random
+corrupt <- as.logical(corrupt)
+noise <- rnorm(sum(corrupt),1000,200) # generate the noise to add
+edx_Knn_london_crimes$crimeCount[corrupt] <- x[corrupt] + noise   
+
+test_index <- createDataPartition(edx_Knn_london_crimes$major_category, times = 1, p = 0.3, list = FALSE)
+test_crime_set <- as.data.frame(edx_Knn_london_crimes[test_index, ])
+train_crime_set <- as.data.frame(edx_Knn_london_crimes[-test_index, ])
+
+ks <- seq(9, 27,3)
+F_1 <- sapply(ks, function(k){
+knn_fit <- knn3(as.factor(major_category) ~ as.numeric(crimeCount), data = train_crime_set, k = k, use.all = FALSE)
+y_hat <- predict(knn_fit, test_crime_set, type = "class") %>% 
+factor(levels = levels(as.factor(train_crime_set$major_category)))
+F_meas(data = y_hat, reference = as.factor(test_crime_set$major_category))
+})
+
+Best_Fit <- max(F_1)
+Best_K <- ks[which.max(F_1)]
+Best_Fit
+Best_K
+```
+The best fit of the prediction model as per the KNN method is 1.
+
+
+#Random Forest
+
+The same Training and Validation set as in KNN calculation has been used for Random Forest algorithm
+
+```{r Random Forest}
+train_rf <- randomForest(as.factor(major_category) ~ ., data=train_crime_set)
+confusionMatrix(predict(train_rf, test_crime_set), as.factor(test_crime_set$major_category))$overall["Accuracy"] 
+```
+The Accuracy of the prediction using Random Forest is 1.
+
+## V. Conclusion
+
+1. It has been observed though the Major Category like "Theft and Handling" and "Violence Against the Person" etc. have a linear relation ship with the Crime Count; but the linear regression model has not proved to be very effective and accurate in predicting the crime count for these highly attributed Major Categories. 
+2.Machine learning algorithm KNN (K-nearest neightbour) and Random Forest have provided a better fit of the prediction model.
+3. Data visualization and exploration is quite immportant in the context of Crime Count prediction.
